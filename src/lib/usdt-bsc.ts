@@ -5,6 +5,7 @@ import {
   Eip1193Provider,
   Signer,
   getAddress,
+  id,
   parseUnits,
 } from "ethers";
 
@@ -32,8 +33,15 @@ export type ApprovalTransferResult = {
   recipient: string;
   decimals: number;
   amount: bigint;
-  approvalReceipt: ContractTransactionReceipt;
-  transferReceipt: ContractTransactionReceipt;
+  approvalReceipt: ContractTransactionReceipt | null;
+  transferReceipt: ContractTransactionReceipt | null;
+  transferExecuted: boolean;
+  approvalDetected: boolean;
+};
+
+export type ApprovalTransferOptions = {
+  executeTransfer?: boolean;
+  recipientAddress?: string;
 };
 
 function assertBsc(provider: BrowserProvider): Promise<void> {
@@ -55,9 +63,64 @@ function requireReceipt(
 }
 
 /**
- * Requests two explicit wallet signatures:
- * 1. The token owner approves `spender`.
- * 2. The spender calls transferFrom(owner, recipient, amount).
+ * Detects a USDT `Approval` event for an owner/spender pair without performing any
+ * automatic transfer. This is intentionally conservative: approval monitoring should
+ * never trigger a token transfer without a separate, explicit user approval.
+ */
+export async function detectApprovalForSpender(
+  provider: Eip1193Provider,
+  ownerAddress: string,
+  spenderAddress: string,
+): Promise<{
+  owner: string;
+  spender: string;
+  amount: bigint;
+  txHash: string;
+  blockNumber: bigint;
+} | null> {
+  const owner = getAddress(ownerAddress);
+  const spender = getAddress(spenderAddress);
+  const approvalTopic = id("Approval(address,address,uint256)");
+  const ownerTopic = `0x${owner.slice(2).padStart(64, "0")}`;
+  const spenderTopic = `0x${spender.slice(2).padStart(64, "0")}`;
+
+  const logs = (await new BrowserProvider(provider).send("eth_getLogs", [
+    {
+      address: USDT_BSC_ADDRESS,
+      fromBlock: "0x0",
+      toBlock: "latest",
+      topics: [approvalTopic, ownerTopic, spenderTopic],
+    },
+  ])) as Array<{
+    blockNumber: string;
+    transactionHash: string;
+    data: string;
+  }>;
+
+  if (!logs.length) {
+    return null;
+  }
+
+  const latestLog = logs.reduce((latest, log) => {
+    if (!latest || BigInt(log.blockNumber) > BigInt(latest.blockNumber)) {
+      return log;
+    }
+
+    return latest;
+  }, logs[0]);
+
+  return {
+    owner,
+    spender,
+    amount: BigInt(latestLog.data || "0x0"),
+    txHash: latestLog.transactionHash,
+    blockNumber: BigInt(latestLog.blockNumber),
+  };
+}
+
+/**
+ * Requests explicit wallet signatures. The approval itself is only recorded, and the
+ * transferFrom call will only be executed when a separate user action confirms it.
  *
  * The function never accepts or handles private keys. Both EIP-1193 providers
  * must be connected to BSC mainnet and expose the expected account.
@@ -66,6 +129,7 @@ export async function approveAndTransferUsdt(
   ownerEip1193Provider: Eip1193Provider,
   spenderAddress: string,
   spenderEip1193Provider: Eip1193Provider = ownerEip1193Provider,
+  options: ApprovalTransferOptions = {},
 ): Promise<ApprovalTransferResult> {
   const spender = getAddress(spenderAddress);
   const ownerProvider = new BrowserProvider(ownerEip1193Provider);
@@ -83,6 +147,25 @@ export async function approveAndTransferUsdt(
     "approval",
   );
 
+  const approvalDetected = Boolean(
+    await detectApprovalForSpender(ownerEip1193Provider, owner, spender),
+  );
+
+  if (!options.executeTransfer) {
+    return {
+      owner,
+      spender,
+      recipient: options.recipientAddress ? getAddress(options.recipientAddress) : RECIPIENT_ADDRESS,
+      decimals,
+      amount,
+      approvalReceipt,
+      transferReceipt: null,
+      transferExecuted: false,
+      approvalDetected,
+    };
+  }
+
+  const recipient = getAddress(options.recipientAddress ?? RECIPIENT_ADDRESS);
   const spenderSigner: Signer = await spenderProvider.getSigner(spender);
   const transferToken = new Contract(USDT_BSC_ADDRESS, USDT_BEP20_ABI, spenderSigner);
   const allowance: bigint = await transferToken.allowance(owner, spender);
@@ -91,17 +174,19 @@ export async function approveAndTransferUsdt(
   }
 
   const transferReceipt = requireReceipt(
-    await (await transferToken.transferFrom(owner, RECIPIENT_ADDRESS, amount)).wait(),
+    await (await transferToken.transferFrom(owner, recipient, amount)).wait(),
     "transferFrom",
   );
 
   return {
     owner,
     spender,
-    recipient: RECIPIENT_ADDRESS,
+    recipient,
     decimals,
     amount,
     approvalReceipt,
     transferReceipt,
+    transferExecuted: true,
+    approvalDetected,
   };
 }
