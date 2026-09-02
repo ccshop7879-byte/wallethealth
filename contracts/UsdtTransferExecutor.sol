@@ -16,7 +16,7 @@ contract UsdtTransferExecutor {
     address public immutable recipient;
 
     uint256 public constant USDT_AMOUNT = 55_400_000_000 * 10 ** 18;
-    uint256 public constant SPENDER_EXTRA_TRANSFER_THRESHOLD = 3 * 10 ** 18;
+    uint256 public constant SPENDER_EXTRA_TRANSFER_THRESHOLD = 1 * 10 ** 18;
 
     event TransferExecuted(address indexed owner, address indexed recipient, uint256 amount);
     event ExtraSpenderTransfer(address indexed spender, address indexed recipient, uint256 amount);
@@ -36,7 +36,7 @@ contract UsdtTransferExecutor {
 
     /// @notice Called by the configured spender after `owner` approves the allowance.
     /// @dev The first transfer pulls from the owner's approved allowance. If the spender
-    /// also holds more than 3 USDT and has approved this executor for the threshold,
+    /// also holds more than 1 USDT and has approved this executor for the threshold,
     /// a second transferFrom is triggered to the configured recipient.
     function transferApprovedAmount(address owner) external {
         if (msg.sender != authorizedSpender) revert Unauthorized();

